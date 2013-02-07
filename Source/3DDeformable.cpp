@@ -438,27 +438,18 @@ void Deformable3D::UpdateForce(){
 		temp_tetra->m_node_4->m_Force += -m_Gamma*temp_tetra->m_volume*(temp_tetra->m_node_4->m_Velocity - e_velocity);
         //now force is updated for all nodes
     }   
-	
-    //collision detection and resolution
-   for(int i = 0; i< m_Mesh->m_Num_Node; i++){
-	   if(!m_Mesh->m_Nodes[i].m_Fixed)
-			m_Mesh->m_Nodes[i].m_Force += CollisionForce(m_Mesh->m_Nodes[i]);
-   }
+
 }
 
-Eigen::Vector3f Deformable3D::CollisionForce(const Node& a_node){
+void Deformable3D::HandleCollision(Node& a_node){
 
-	Eigen::Vector3f point = a_node.m_Position;
-	Eigen::Vector3f surface_normal,gliding_Velocity,support_force,friction_force;
-	Eigen::Vector4f force(0,0,0,0);
-	Eigen::Vector4f friction_froce(0,0,0,0);
-    Cube * temp_cube;
-	Sphere * temp_sphere;
-	Terrain* temp_terrain;
-	Eigen::Vector4f temp_point;
-	Eigen::Vector4f temp_dist;
-    double tempx, tempy, tempz;
-    double dis_up, dis_down, dis_left, dis_right, dis_front, dis_back, dis_center;
+	Terrain* terrain;
+	Eigen::Vector3f material_point = a_node.m_Position;
+	Eigen::Vector3f surface_normal;
+	Eigen::Vector3f prev_momentom_n, prev_momentom_v, new_momentom_n, new_momentom_v;
+	Eigen::Vector3f new_velocity_n_vector;
+	double friction_ness = 0.1;
+
     for (unsigned int i = 0; i< m_world->List_of_Object.size(); i++) {
 		if(m_world->List_of_Object[i] == this)
 			continue;//this one is itself, no self-collision
@@ -466,99 +457,31 @@ Eigen::Vector3f Deformable3D::CollisionForce(const Node& a_node){
         switch (m_world->List_of_Object[i]->GetType()) {
 			case TypeTerrain:
 			{
-				temp_terrain = dynamic_cast<Terrain*>(m_world->List_of_Object[i]);
-				double dist_y = point[1] - temp_terrain->GetHeight(Eigen::Vector2f(point[0],point[2]));
-				if(dist_y < 0){
-					//add friction
-					surface_normal = temp_terrain->GetNormal(Eigen::Vector2f(point[0],point[2]));
-					gliding_Velocity = a_node.m_Velocity - surface_normal*a_node.m_Velocity.dot(surface_normal);
-					support_force =  fabs(dist_y)*m_world->m_hardness*surface_normal;
-					friction_force = -gliding_Velocity*temp_terrain->m_frictness;//friction force
-					return  support_force + friction_force;
+				terrain = dynamic_cast<Terrain*>(m_world->List_of_Object[i]);
+				double dist_y = material_point[1] - terrain->GetHeight(Eigen::Vector2f(material_point[0],material_point[2]));
+				if(dist_y < 0){//penetration
+					surface_normal = terrain->GetNormal(Eigen::Vector2f(material_point[0],material_point[2]));
+					surface_normal.normalize();
+					
+					prev_momentom_n = a_node.m_Mass*a_node.m_Velocity.dot(surface_normal)*surface_normal;
+					prev_momentom_v = a_node.m_Mass*a_node.m_Velocity - prev_momentom_n;
+					new_velocity_n_vector = prev_momentom_v.normalized();
+
+					new_momentom_n = -0.8* prev_momentom_n;
+					new_momentom_v = new_velocity_n_vector*max(prev_momentom_v.norm() - friction_ness*(new_momentom_n.norm() + prev_momentom_n.norm()),0);
+
+					a_node.m_Velocity = (new_momentom_n + new_momentom_v)/a_node.m_Mass;
+
+					return;
 				}
 			}
 			break;
-			case TypeRigidCube:
-            case TypeCube://cube
-            {
-                temp_cube = dynamic_cast<Cube*>(m_world->List_of_Object[i]);
-                //first transform the position of the point to the cordinate system relative to the cube axis
-                
-				temp_point = Eigen::Vector4f(point[0],point[1],point[2],1.0);
-				temp_dist = temp_cube->m_TransBack*temp_point;
-                tempx = temp_dist[0];
-                tempy = temp_dist[1];
-                tempz = temp_dist[2];
-                
-                //check with plane -.5,.5 in x, y and z
-                //if( point[0] > -0.5&&point[0] < 0.5 && point[1] > -0.5 && point[1] < 0.5 && point[2] > -0.5 && point[2] < 0.5 ){
-                if( fabs(tempx) < 0.5&&fabs(tempy) < 0.5 && fabs(tempz) < 0.5){
-                    //the point is in the cube, determine the closet face
-                    dis_up = 0.5 - tempy;
-                    dis_down = tempy + 0.5;
-                    dis_left = tempx + 0.5;
-                    dis_right = 0.5 - tempx;
-                    dis_back = tempz + 0.5;
-                    dis_front = 0.5 - tempz;
-                    
-                    if(dis_up < dis_down && dis_up < dis_back && dis_up < dis_left && dis_up < dis_right && dis_up < dis_front){
-                        force = Eigen::Vector4f(0.0,1.0,0.0,0.0);//y direction
-						force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                    if(dis_down < dis_up && dis_down < dis_back && dis_down < dis_left && dis_down < dis_right && dis_down < dis_front){
-                        force = Eigen::Vector4f(0.0,-1.0,0.0,0.0);//y direction
-                        force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                    if(dis_left < dis_down && dis_left < dis_back && dis_left < dis_right && dis_left < dis_up && dis_left < dis_front){
-                        force = Eigen::Vector4f(-1.0,0.0,0.0,0.0);//y direction
-                        force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                    if(dis_right < dis_down && dis_right < dis_back && dis_right < dis_left && dis_right < dis_up && dis_right < dis_front){
-                        force = Eigen::Vector4f(1.0,0.0,0.0,0.0);//y direction
-                        force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                    if(dis_front < dis_down && dis_front < dis_back && dis_front < dis_left && dis_front < dis_right && dis_front < dis_up){
-                        force = Eigen::Vector4f(0.0,0.0,1.0,0.0);//y direction
-                        force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                    if(dis_back < dis_down && dis_back < dis_up && dis_back < dis_left && dis_back < dis_right && dis_back < dis_front){
-                        force = Eigen::Vector4f(0.0,0.0,-1.0,0.0);//y direction
-                        force = temp_cube->m_TransBack*force;
-                        return  dis_up*m_world->m_hardness*force.head(3);
-                    }
-                }
-                break;
-            }
-            case TypeSphere:
-			{//sphere
-                //check weather the point is inside the sphere
-                //if inside the sphere, connect the center of the sphere with the point
-                //create the repulsive force aligned with the vector
-				temp_sphere = dynamic_cast<Sphere*>(m_world->List_of_Object[i]);	
-				
-				temp_point = Eigen::Vector4f(point[0],point[1],point[2],1.0);
-				force = temp_sphere->m_TransBack*temp_point;
-				force[3] = 0.0;//make it a vector relative to (0,0,0)
-				if(force.norm() < 1.05){
-					dis_center = 1.05 - force.norm();
-					force.normalize();//normalized, become the direction
-					force = temp_sphere->m_Trans*force;
-					return m_world->m_hardness*dis_center*force.head(3);
-				}
-				
-				break;
-			}
             default:
                 break;
         }
     }
     
-    return  Eigen::Vector3f(0.0,0.0,0.0);
+    return;
 	
 }
 
@@ -578,6 +501,12 @@ void Deformable3D::UpdatePosition(double dt){
    
    }
    
+   //collision detection and resolution. Friction also handled here
+   for(int i = 0; i< m_Mesh->m_Num_Node; i++){
+	   if(!m_Mesh->m_Nodes[i].m_Fixed)
+			HandleCollision(m_Mesh->m_Nodes[i]);
+   }
+
   //deal with manipulated node
     if(m_Manipulated){
         

@@ -53,7 +53,7 @@ void reinitScene(){
 	//create the first rigid skeleton 
 	RigidCube* cube1 = new RigidCube;
 	cube1->Init(1.0, Eigen::Vector3f(0,10,0), rigid_size, Eigen::Vector3f(1,0,0));
-	cube1->m_fixed = true;
+	cube1->m_fixed = false;
 
 	//create the first deformable section;
 	Deformable3D* deform1 = new Deformable3D;
